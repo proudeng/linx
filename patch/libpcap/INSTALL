@@ -1,0 +1,10 @@
+Download libpcap-1.x.x.tar.gz to <mydir>.
+
+Copy libpcap-1.x.x-linxtrace-001.patch to <mydir>. 
+
+> cd <mydir>
+> tar xzvf libpcap-1.x.x.tar.gz
+> patch -p1 < libpcap-1.x.x-linxtrace-001.patch
+> cd libpcap-1.x.x
+> ./configure
+> make

@@ -1,0 +1,1 @@
+cmd_/home/proudeng/Code/linx-2.6.9/net/linx/riocm/linx_rio_cm.mod := printf '%s\n'   rio_conn.o rio_tx.o rio_rx.o rio_kutils.o | awk '!x[$$0]++ { print("/home/proudeng/Code/linx-2.6.9/net/linx/riocm/"$$0) }' > /home/proudeng/Code/linx-2.6.9/net/linx/riocm/linx_rio_cm.mod

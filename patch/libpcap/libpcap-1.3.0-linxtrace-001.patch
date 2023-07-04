@@ -1,0 +1,84 @@
+diff -rupN old/libpcap-1.3.0/gencode.c new/libpcap-1.3.0/gencode.c
+--- old/libpcap-1.3.0/gencode.c	2013-04-10 11:01:35.573024000 +0200
++++ new/libpcap-1.3.0/gencode.c	2013-04-10 11:23:24.021477000 +0200
+@@ -1438,7 +1438,13 @@ init_linktype(p)
+ 		off_nl = 0;		/* Ethernet II */
+ 		off_nl_nosnap = 3;	/* 802.3+802.2 */
+ 		return;
+-
++		
++	case DLT_LINX_INTERNAL:
++		off_linktype = -1;
++		off_nl = 12;
++		off_nl_nosnap = -1;
++		return;
++		
+ 	default:
+ 		/*
+ 		 * For values in the range in which we've assigned new
+diff -rupN old/libpcap-1.3.0/pcap/bpf.h new/libpcap-1.3.0/pcap/bpf.h
+--- old/libpcap-1.3.0/pcap/bpf.h	2013-04-10 11:01:34.028003000 +0200
++++ new/libpcap-1.3.0/pcap/bpf.h	2013-04-10 11:31:39.615572000 +0200
+@@ -579,6 +579,8 @@ struct bpf_program {
+ #define DLT_USER14		161
+ #define DLT_USER15		162
+ 
++#define DLT_LINX_INTERNAL DLT_USER0	
++	
+ /*
+  * For future use with 802.11 captures - defined by AbsoluteValue
+  * Systems to store a number of bits of link-layer information
+@@ -683,6 +685,10 @@ struct bpf_program {
+ #define DLT_JUNIPER_FRELAY      180
+ #define DLT_JUNIPER_CHDLC       181
+ 
++#ifndef DLT_LINX_INTERNAL
++#define DLT_LINX_INTERNAL       DLT_USER0
++#endif	
++	
+ /*
+  * Multi Link Frame Relay (FRF.16)
+  */
+diff -rupN old/libpcap-1.3.0/pcap.c new/libpcap-1.3.0/pcap.c
+--- old/libpcap-1.3.0/pcap.c	2013-04-10 11:01:35.603023000 +0200
++++ new/libpcap-1.3.0/pcap.c	2013-04-10 11:25:31.450040000 +0200
+@@ -866,6 +866,7 @@ static struct dlt_choice dlt_choices[] =
+ 	DLT_CHOICE(DLT_NETANALYZER, "Ethernet with Hilscher netANALYZER pseudo-header"),
+ 	DLT_CHOICE(DLT_NETANALYZER_TRANSPARENT, "Ethernet with Hilscher netANALYZER pseudo-header and with preamble and SFD"),
+ 	DLT_CHOICE(DLT_IPOIB, "RFC 4391 IP-over-Infiniband"),
++	DLT_CHOICE(DLT_LINX_INTERNAL, "LINX"),
+ 	DLT_CHOICE_SENTINEL
+ };
+ 
+diff -rupN old/libpcap-1.3.0/pcap-common.c new/libpcap-1.3.0/pcap-common.c
+--- old/libpcap-1.3.0/pcap-common.c	2013-04-10 11:01:34.903012000 +0200
++++ new/libpcap-1.3.0/pcap-common.c	2013-04-10 11:28:13.451036000 +0200
+@@ -301,6 +301,9 @@
+ #define LINKTYPE_USER14		161
+ #define LINKTYPE_USER15		162
+ 
++/* LINX internal messages */
++#define LINKTYPE_LINX_INTERNAL  LINKTYPE_USER0
++
+ /*
+  * For future use with 802.11 captures - defined by AbsoluteValue
+  * Systems to store a number of bits of link-layer information
+diff -rupN old/libpcap-1.3.0/pcap-linux.c new/libpcap-1.3.0/pcap-linux.c
+--- old/libpcap-1.3.0/pcap-linux.c	2013-04-10 11:01:34.988016000 +0200
++++ new/libpcap-1.3.0/pcap-linux.c	2013-04-10 11:26:24.579701000 +0200
+@@ -2843,7 +2843,14 @@ static void map_arphrd_to_dlt(pcap_t *ha
+ 		/* Don't expect IP packet out of this interfaces... */
+ 		handle->linktype = DLT_LINUX_LAPD;
+ 		break;
+-
++		
++#ifndef ARPHRD_LINX
++#define ARPHRD_LINX 0x8911
++#endif
++	case ARPHRD_LINX:
++		handle->linktype = DLT_LINX_INTERNAL;
++		break;
++		
+ #ifndef ARPHRD_NONE
+ #define ARPHRD_NONE	0xFFFE
+ #endif

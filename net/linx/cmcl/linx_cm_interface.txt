@@ -1,0 +1,425 @@
+LINX Connection Manager Interface
+
+		LINX Connection Manager Interface 1.0
+
+  1. Introduction
+  2. Interface
+  3. Creating and Destroying Connections
+  4. The LINX Connection Manager down calls
+   4.1 Init down call
+   4.2 Connect down call
+   4.3 Disconnect down call
+   4.4 Finalize down call
+   4.5 Transmit down call
+  5. The LINX Connection Manager Interface Up Calls
+   5.1 Alloc up call
+   5.2 Free up call
+   5.3 Error up call
+   5.4 The Connected Up Call
+   5.5 The Disconnected Down Call
+   5.6 The Deliver Up Call
+  6. Sequences
+  7. Trademarks
+	 	
+1. Introduction
+
+This document is aimed at developers of CM/CMTL layers.
+
+The LINX Connection Manager Interface was originally designed in mind
+that the RLNH layer provides a distributed OSE API and the connection
+manager (CM) is responsible for connection establishment and reliable
+in-order transmission of data. This division allows the each CM to be
+optimized for the media it supports; for instance if the media is
+loss-less the CM does not need the extra over-head of implementing its
+own reliability layer.
+
+Experience has shown that many of the responsibilities of a CM are
+common for different kinds of CMs, so in order to allow LINX to be
+more rapidly deployed on new media the CMCL was designed. It takes
+care of the connection establishment and connection-supervision
+allowing the underlying layer to focus on reliable transport of
+data. The CMCL is optional and entirely stackable; it uses the same
+interface, the LINX Connection Manager Interface, towards RLNH as it
+does to the underlying layer.
+
+The underlying layer of CMCL can be the driver directly if the driver
+is adapted to use the LINX Connection Manager Interface or a thin
+layer between CMCL and the existing driver. For unreliable media a
+thin layer can handle reliability but for reliable media there is
+little need for another layer, the driver should use the LINX
+Connection Manager Interface directly.
+
+
+Since the CMCL is stackable it can even be removed in situations where
+connection-supervision and connection establishment is not needed. For
+instance in static configurations like inter-CPU communication between
+cores, in that case the driver using the LINX Connection Manager
+interface can be directly under the RLNH layer.
+ 
+The LINX Connection Manager Interface on Linux is defined in
+<path/to/linx>/net/linx/rlnh/rlnh_link.h, on OSE5 in
+include/linx/linx_conn.h and on OSEck in linx/include/linx_conn.h. The
+interface simplified and optimized on OSEck but connection
+establishment follows the same rules.
+
+
+2. Interface
+
+The interface consists of two functions sets, up-calls and
+down-calls. The up-calls are defined by struct RlnhLinkUCIF. They are
+implemented both in the RLNH and CMCL and are used by the CM and
+CMTL. The down-calls are defined by struct RlnhLinkIF. They are
+implemented in the CM and CMTL and are used by RLNH and CMCL.
+
+CMCL implements the CM rules defined by LINX Connection Manager
+Interface but this is also required by the underlying layers. The
+Driver or CM underneath the CMCL must in turn follow the same rules in
+LINX Connection Manager Interface when using the callbacks into the
+CMCL layer.
+
+
+3. Creating and Destroying Connections
+
+When a connection is created the CMTL layer must provide a connection
+object and a down call interface as defined by the LINX Connection
+Manager Interface on that platform.
+
+The CMTL can implement two public functions, a create connection
+function and a destroy connection function, which are used by the
+applications. There are no strict prototypes for these functions,
+since the input parameters to the create function is highly media
+dependent. The output from the create function should be an
+initialized LINX connection object, LinxConnObj (RlnhLinkObj on Linux)
+and the CM's down calls, i.e. struct LinxConnDCIF (RlnhLinkIF on
+Linux). The connection object contains all per-connection data and is
+passed back to the CM in every down call. The destroy function should
+free any resources allocated in the create function. The down call
+interface is passed to RLNH/CMCL in its create function together with
+the LINX Connection object that is used as a handle in all down calls
+to the CM/CMTL.
+
+
+4. The LINX Connection Manager down calls
+
+4.1 Init down call
+
+When the create function is called in the RLNH/CMCL layer it calls the
+init down call, this gives the CM/CMTL a chance to allocate and
+initialize connection-specific resources. In this down call the
+RLNH/CMCL passes the up calls and handle for the CM/CMTL to use when
+calling the up calls.
+
+
+4.2 Connect down call
+
+After the down call init the CM or CMTL should be in a disconnected
+state and remain in that state until the RLNH or CMCL layer calls the
+connect down call. The CMTL should repeatedly make connect attempts
+until it succeeds or the RLNH/CMCL uses disconnect down call to abort
+the connection setup. Both the connect- and disconnect down calls are
+executed from the same context so the connection phase must run in
+another context. No transmit down calls are made during the connection
+phase, which starts with the connect down call and end with the
+CM/CMTL calling the connected up call.
+
+In case of a down call disconnect while in the connection phase the
+CM/CMTL must not call the connected up call, instead it should
+immediately disconnect and call the disconnected up call. The
+connection phase can only be aborted by a disconnect down call from
+RLNH/CMCL.
+
+
+4.3 Disconnect down call
+
+The RLNH/CMCL uses the disconnect down call when it wants the CM/CMTL
+to disconnect. The CM/CMTL must tolerate this down call in any state
+and it must always reply with a disconnected up call. When the down
+call has been called, the CM/CMTL must start terminating the
+connection to its peer. Once the connection is down it should use the
+disconnected up call. During the entire disconnect phase, the CM/CMTL
+must tolerate transmit down calls. The disconnect phase starts with a
+disconnect down call and ends with either a finalize down call or a
+connect down call (i.e. try to re-connect). If a transmit down call is
+made while disconnecting, the CM/CMTL should silently free the signal
+buffer.
+
+
+4.4 Finalize down call
+
+If the connection should be removed from the system after it has been
+terminated, the RLNH/CMCL will call the finalize down call to tell the
+CM/CMTL to free any resources etc. No down calls will be made for this
+connection after this one and the CM/CMTL must not make any up calls
+for this connection. The CM/CMTL should also clear any references to
+the RLNH/CMCL handle, because it will be destroyed after the finalize
+down call has returned.
+
+
+4.5 Transmit down call
+
+The transmit down call is used to transmit or start transmission of a
+signal over the connection. The following has big impact on the design
+and implementation of this down call:
+
+    * On OSE5 and OSEck it is called as a result of a send system
+      call, i.e., it can be called from any context that allows the
+      send system call. (On Linux the RLNH/CMCL and CM/CMTL are
+      running in kernel space and the call is always made in the
+      context of a kernel thread or worker queue.)
+
+    * On OSE5 and OSEck it must not block because it can be called
+      from an interrupt process.
+
+    * On OSE5 and OSEck only system calls that are allowed from an
+      interrupt process may be used in this down call.
+
+    * It can be preempted at any time, even by another transmit down
+      call.
+
+    * On OSE5 it will run to completion, any kill-process attempts to
+      the process executing the transmit down call is deferred until
+      this down call has returned, unless it is done from the down
+      call itself. On OSEck this is not an issue since asynchronous
+      kill is not supported.
+
+    * The CM/CMTL must make sure that it can handle transmit down call
+      before calling connected up call, then it must tolerate transmit
+      down calls until the next connect down call.     
+      
+Signals should only be sent over the connection if it is connected,
+otherwise they should be silently freed. The transmit down call is
+responsible to make sure that signals are transmitted in the right
+order, i.e. in order per process. On a reliable media, no special
+measures need to be taken. For example, if a transmit queue is used,
+simply let the transmit down call add signals to the end of queue,
+while the device driver removes and transmits signals from the queue
+head. To guarantee in-order-delivery for unreliable media is much more
+complex and the CM/CMTL must implement a reliability protocol, an
+example of such protocol can be found in the document "LINX
+Protocols".
+
+One of the parameters in this down call is a pointer to the signal
+user data. On OSE5 and OSEck this pointer is the same pointer as the
+sender used in the send system call, i.e. no signal copy has been done
+at the time of calling the transmit down call, on Linux the signal
+used data has been copied from user-space to kernel-space. At this
+point on OSE5 and OSEck, the buffer is owned by the kernel and not by
+the sending process, so it is the CM/CMTL's responsibility to free the
+buffer once it has been sent to the peer. On OSE5 and Linux this
+buffer must be freed with the free up call. On OSEck the signal should
+be freed using the free_buf system call.
+
+The signal user data is not the only data that must be sent to the
+peer, the signal meta data must also be sent. This data is passed in
+the transmit down call, as three separate parameters, src, dst, and
+size. The CM/CMTL must make sure that the peer receives the signal
+user data and its corresponding meta data. This is the time to be
+creative if zero-copy on the transmit side should be achieved. For
+example, if the device supports scatter/gather DMA, it can be used to
+let the HW build one outgoing frame that consist of the meta data
+followed by the user data. On the other hand, a memcpy probably solves
+all the problems (and for small signals, this is probably OK from a
+performance point-of-view).
+
+
+5. The LINX Connection Manager Interface Up Calls
+
+5.1 Alloc up call
+
+This function is used to allocate memory. Its second parameter,
+linxOsParam, is an architecture specific parameter, which on an OSE
+system gives the possibility to allocate two types of memory. If
+linxOsParam is set to 0, a shared buffer is returned and if
+linxOsParam is set to 1, a "normal" signal buffer is returned. In both
+cases, the memory is allocated from a pool. All other values are
+reserved for future use. A shared buffer is owned by the system/kernel
+and not by the calling process. A shared buffer cannot be sent between
+processes and it will not be freed automatically when the process
+dies.
+
+Signal buffers that should be delivered to the RLNH should be
+allocated with this up call and the linxOsParam must be set to 1,
+which is equivalent to an alloc system call. This is the only case
+when it is recommended to use the uc_alloc. There is a possibility to
+use the alloc system call instead of the up call, but the solution may
+not be compatible with future LINX releases.
+
+On Linux this can parameter only be 1, a kernel buffer is returned, no
+other values are allowed at the moment. On Linux the driver usually
+delivers a socket buffer to its clients and in that case the CM/CMTL
+does not need to allocate a buffer to copy the signal into but can
+deliver the socket buffer as is, and indicate that it is a socket
+buffer in the deliver up call.
+
+On OSEck the alloc up call has been removed.
+
+
+5.2 Free up call
+
+This function is used to free memory that has been allocated with the
+uc_alloc. It also has a linxOsParam parameter, which should be set to
+0 for a shared buffer and 1 for a "normal" signal buffer (i.e. the
+value used in uc_alloc should be used in uc_free).
+
+On OSEck the free up call has been removed.
+
+
+5.3 Error up call
+
+This function is used to report an error condition. On OSE5, as of
+now, it merely calls the error2 system call.
+
+On Linux the error is reported in the kernel message log and the stack
+is dumped.
+
+On OSEck the error up call has been removed.
+
+
+5.4 The Connected Up Call
+
+The function is used to tell the RLNH/CMCL that a connection has been
+established with the peer. The CM/CMTL must be ready to handle a
+transmit down call from the moment that the connected up call is
+called. It is not allowed to call the connected up call without a
+proceeding connect down call, for example calling the connected up
+call twice results in undefined behavior.
+
+
+5.5 The Disconnected Down Call
+
+The CM/CMTL uses this function to tell the RLNH/CMCL that a connection
+has been disconnected. The CM must always call the disconnected up
+call for each disconnect down call (regardless of the connection
+state). If the CM/CMTL receives an error from the underlying software
+and it is in connected state, i.e. connected up call has been called,
+then it must call the disconnected up call when the connection has
+been disconnected. It is not allowed to call the disconnected up call
+twice without an intermediate connect down call, this results in
+undefined behavior.
+
+The CM/CMTL must make sure that connected- and disconnected up calls
+for a connection (i.e. same co parameter) does not preempt each
+other.
+
+The CM/CMTL must make sure that it can handle finalize() before calling
+disconnected().
+
+ 
+5.6 The Deliver Up Call
+
+The function is used to hand over a complete signal buffer and its
+corresponding meta data to the RLNH/CMCL. The CM/CMTL may only deliver
+signals to the RLNH from the point when connected up call has returned
+to the point when disconnected up call is called.
+
+On OSE5 the signal buffer must be allocated from the pool, it is
+recommended to always use alloc up call to get memory for these
+buffers. On Linux the buffer is usually a socket buffer and this
+should be indicated in the up call by setting rlnhOsParam to
+BUFFER_TYPE_SKB.
+
+The CM/CMTL must make sure that several calls to the deliver up call,
+for the same connection, do not preempt each other.
+
+The CM/CMTL must make sure that deliver up call is not called any
+more and that all on-going deliver up calls have returned before
+calling disconnected up call.
+
+The CM/CMTL must make sure that deliver upcall is not called until
+connected up call has returned.
+
+  
+6. Sequences
+
+The following sequence shows the "normal" call sequence, from link
+create to link destroy. Once the link is connected, messages are
+transmitted and delivered over the link.
+
+  RLNH/CMCL
+       init   connect        transmit     disconnect     finalize
+         |       |              |              |             |
+  ---------------------------------------------------------------------------->
+                       |            |                |                     time
+                   connected     deliver        disconnected
+  CM/CMTL
+		   		   
+If an error is detected by RLNH/CMCL in the connect phase, the link is
+disconnected and re-connected. Notice that the CM/CMTL responds with
+disconnected up call when RLNH/CMCL calls disconnect down call.
+
+		   
+ RLNH/CMCL
+      connect     error detected   disconnect     connect
+         |              |               |            |    
+ ---------------------------------------------------------------------------->
+                                              |               |           time
+                                        disconnected      connected
+ CM/CMTL
+
+If an error is detected by the CM/CMTL after connect down call, two
+different scenarios are possible:
+
+ 1. Before connected up call, the CM/CMTL should keep trying to
+    connect to its peer or sit tight until a disconnect downcall.
+
+ RLNH/CMCL
+      connect                              disconnect
+         |                                      |
+ ---------------------------------------------------------------------------->
+                 |                                      |                 time
+           error detected                         disconnected
+ CM/CMTL
+
+ 
+ 2. After connected down call, the CM/CMTL must call disconnected up
+    call.
+
+ RLNH/CMCL
+      connect                                      connect
+         |                                            |
+ ---------------------------------------------------------------------------->
+               |               |              |              |            time
+           connected    error detected  disconnected     connected
+ CM/CMTL
+
+ The implementation of these functions (or callbacks) may vary, in some
+ implementations the tasks are carried out directly in the functions and in
+ others the tasks are deferred to e.g. a workqueue. A couple of race
+ situation can occur.
+
+ After disconnect up call, RLNH/CMCL tolerates connected- and deliver
+ up calls until a disconnected up call.
+ 
+ 
+ RLNH/CMCL
+      connect    disconnect                                   connect
+         |            |       X            X                     |
+ ---------------------------------------------------------------------------->
+                              |            |               |              time
+                          connected()  deliver()      disconnected
+ CM/CMTL
+  
+ If the CM detects an error after connected up call, it calls
+ disconnected up call. In this state, it must tolerate a disconnect
+ downcall. Also transmit down call must also be tolerated.
+
+ RLNH/CMCL
+      connect                                      disconnect
+         |                                              |
+ ---------------------------------------------------------------------------->
+               |               |              |         X                 time
+           connected    error detected  disconnected
+ CM/CMTL
+
+
+ 
+7. Trademarks
+
+LINX, OSE, OSEck are registered trademarks of Enea Software AB.
+Linux is a registered trademark of Linus Torvalds.
+PowerPC is a registered trademark of IBM Corporation.
+i386 is a registered trademark of Intel Corporation.
+All other trademarks, trade names or copyrights used
+in files in the LINX distribution are the property
+of their respective owners and are used for identification
+purposes only.

@@ -1,0 +1,1 @@
+cmd_/home/proudeng/Code/linx-2.6.9/net/linx/ecm/linx_eth_cm.mod := printf '%s\n'   ecm_conn.o ecm_tx.o ecm_rx.o ecm_kutils.o | awk '!x[$$0]++ { print("/home/proudeng/Code/linx-2.6.9/net/linx/ecm/"$$0) }' > /home/proudeng/Code/linx-2.6.9/net/linx/ecm/linx_eth_cm.mod

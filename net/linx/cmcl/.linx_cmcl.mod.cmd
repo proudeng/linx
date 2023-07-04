@@ -1,0 +1,1 @@
+cmd_/home/proudeng/Code/linx-2.6.9/net/linx/cmcl/linx_cmcl.mod := printf '%s\n'   cmcl.o | awk '!x[$$0]++ { print("/home/proudeng/Code/linx-2.6.9/net/linx/cmcl/"$$0) }' > /home/proudeng/Code/linx-2.6.9/net/linx/cmcl/linx_cmcl.mod
